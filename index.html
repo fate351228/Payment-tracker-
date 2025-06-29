@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Advanced Ticket Payment Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="cat-icon.png" type="image/png">
+  <meta name="theme-color" content="#ffffff">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+    }
+  </script>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 40px auto; padding: 0 10px; }
+    input, textarea { width: 100%; margin: 5px 0 10px; padding: 8px; }
+    button { padding: 10px; margin: 5px 0; width: 100%; border: none; border-radius: 5px; background: #4caf50; color: white; font-weight: bold; }
+    .note { font-size: 0.9em; color: gray; }
+    .progress-bar { width: 100%; background: #eee; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+    .progress { height: 20px; background-color: #4caf50; width: 0%; text-align: center; color: white; font-size: 0.8em; line-height: 20px; }
+    .person { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin-bottom: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .person h3 { margin-top: 0; }
+    ul { padding-left: 20px; }
+    .chart-container { width: 100%; margin-top: 20px; }
+    @media print {
+      button, textarea, input { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <h2>🐱🎟️ Multi-Payment Ticket Tracker</h2>
+  <p>Total Cost: <strong>$1,100.05</strong></p>
+  <div class="progress-bar">
+    <div id="progress" class="progress">0%</div>
+  </div>
+  <p>Total Paid So Far: <strong id="totalPaidDisplay">$0.00</strong></p>
+
+  <p class="note">Madyson is skipping June 27 and has extended by 1 month.</p>
+
+  <div id="peopleContainer"></div>
+
+  <label>General Notes:</label>
+  <textarea id="notes" rows="4" placeholder="Add any notes..."></textarea>
+  <p id="lastSaved" class="note"></p>
+
+  <button onclick="saveData()">💾 Save & Backup</button>
+  <button onclick="clearData()">🗑️ Clear All Data</button>
+  <button onclick="window.print()">🖨️ Print / Export to PDF</button>
+
+  <div class="chart-container">
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    const totalCost = 1100.05;
+    const people = ["Destinee", "Anne", "Madyson"];
+    let paymentData = {};
+
+    function formatCurrency(val) {
+      return "$" + parseFloat(val || 0).toFixed(2);
+    }
+
+    function renderPeople() {
+      const container = document.getElementById("peopleContainer");
+      container.innerHTML = "";
+      people.forEach(name => {
+        const personDiv = document.createElement("div");
+        personDiv.className = "person";
+        personDiv.innerHTML = `
+          <h3>${name}</h3>
+          <input type="number" id="${name}_amount" placeholder="Enter payment amount">
+          <input type="date" id="${name}_date">
+          <button onclick="addPayment('${name}')">Add Payment</button>
+          <ul id="${name}_list"></ul>
+          <p><strong>Total Paid:</strong> <span id="${name}_total">$0.00</span></p>
+          <p><strong>Owes:</strong> <span id="${name}_owes">$0.00</span></p>
+        `;
+        container.appendChild(personDiv);
+      });
+    }
+
+    function addPayment(name) {
+      const amount = parseFloat(document.getElementById(`${name}_amount`).value);
+      const date = document.getElementById(`${name}_date`).value;
+      if (!amount || !date) return alert("Please enter both amount and date.");
+      if (!paymentData[name]) paymentData[name] = [];
+      paymentData[name].push({ amount, date });
+      document.getElementById(`${name}_amount`).value = "";
+      document.getElementById(`${name}_date`).value = "";
+      updateUI();
+    }
+
+    function updateUI() {
+      let totalPaid = 0;
+      let chartData = [];
+
+      people.forEach(name => {
+        const ul = document.getElementById(`${name}_list`);
+        ul.innerHTML = "";
+        let personTotal = 0;
+        (paymentData[name] || []).forEach(p => {
+          personTotal += p.amount;
+          const li = document.createElement("li");
+          li.textContent = `${p.date}: ${formatCurrency(p.amount)}`;
+          ul.appendChild(li);
+        });
+        totalPaid += personTotal;
+        document.getElementById(`${name}_total`).textContent = formatCurrency(personTotal);
+        document.getElementById(`${name}_owes`).textContent = formatCurrency((totalCost / 3) - personTotal);
+        chartData.push(personTotal);
+      });
+
+      document.getElementById("totalPaidDisplay").textContent = formatCurrency(totalPaid);
+      const percent = Math.min((totalPaid / totalCost) * 100, 100).toFixed(1);
+      const bar = document.getElementById("progress");
+      bar.style.width = percent + "%";
+      bar.textContent = percent + "%";
+
+      renderChart(chartData);
+    }
+
+    function saveData() {
+      const notes = document.getElementById("notes").value;
+      const timestamp = new Date().toLocaleString();
+      const fullData = {
+        people: paymentData,
+        notes,
+        savedAt: timestamp
+      };
+      localStorage.setItem("paymentBackup", JSON.stringify(fullData));
+      document.getElementById("lastSaved").textContent = "Last saved: " + timestamp;
+      updateUI();
+      autoDownload(JSON.stringify(fullData), "payment_backup_" + new Date().toISOString().slice(0,10) + ".json");
+      alert("✅ Data saved and backup downloaded!");
+    }
+
+    function autoDownload(content, filename) {
+      const blob = new Blob([content], { type: 'application/json' });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+    }
+
+    function loadData() {
+      const raw = localStorage.getItem("paymentBackup");
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      paymentData = data.people || {};
+      document.getElementById("notes").value = data.notes || "";
+      document.getElementById("lastSaved").textContent = "Last saved: " + (data.savedAt || "");
+      updateUI();
+    }
+
+    function clearData() {
+      if (confirm("Clear all saved data? This cannot be undone.")) {
+        localStorage.removeItem("paymentBackup");
+        paymentData = {};
+        document.getElementById("notes").value = "";
+        document.getElementById("lastSaved").textContent = "";
+        updateUI();
+      }
+    }
+
+    function renderChart(data) {
+      const ctx = document.getElementById('chart').getContext('2d');
+      if (window.myChart) window.myChart.destroy();
+      window.myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: people,
+          datasets: [{
+            label: 'Total Paid',
+            data,
+            backgroundColor: ['#e91e63', '#4caf50', '#2196f3'] // pink, green, blue
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    renderPeople();
+    loadData();
+  </script>
+</body>
+</html>
